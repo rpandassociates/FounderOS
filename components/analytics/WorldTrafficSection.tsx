@@ -7,10 +7,17 @@
  * country, sized by users. Clicking a pin (or a country row) opens its
  * location card with totals and its top cities.
  *
+ * With real GA rows, the globe also draws missile arcs: one round trip per
+ * country, from the SAME sessions number — inbound (country → server,
+ * visits) and outbound (server → country, content served), in two colours,
+ * both landing on the server pin. GA reports no separate send/receive
+ * counts, and the legend says so in plain words.
+ *
  * Honest states only: unconfigured shows "Not configured" with a Set up
  * link (never fixture numbers, never a globe pretending at traffic); a
  * failed GA read shows the failure; totals always include countries that
- * have no map position, and the section says so when that happens.
+ * have no map position, and the section says so when that happens. No arcs
+ * draw without real GA rows.
  *
  * Client-safe: takes only the serializable GaWorldData shape. The pin
  * mapping (country → centroid) lives in lib/ga-countries, so no node-only
@@ -21,7 +28,9 @@ import { useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Globe as GlobeIcon } from 'lucide-react';
 import { cityKey } from '@/lib/adpilot-globe';
-import { gaGlobePoints } from '@/lib/ga-countries';
+import { buildTrafficArcs, GA_SERVER_PIN, gaGlobePoints } from '@/lib/ga-countries';
+import { arcLegColorToken } from '@/components/adpilot/projection';
+import type { GlobeArc } from '@/components/adpilot/Globe';
 import type { GaCountryRow, GaWorldData } from '@/lib/connectors/ga-data';
 import { SetupLink } from '@/components/SetupLink';
 import { setupHrefFor } from '@/lib/integrations-catalog';
@@ -48,6 +57,9 @@ export function WorldTrafficSection({ data }: { data: GaWorldData }) {
   const traffic = propertyId ? data.traffic[propertyId] : undefined;
   const error = propertyId ? data.errors[propertyId] : undefined;
   const points = useMemo(() => (traffic ? gaGlobePoints(traffic.countries) : []), [traffic]);
+  // One round trip per plotted country, both legs from the same sessions
+  // number; unplotted countries get no arc (they still count in totals).
+  const arcs: GlobeArc[] = useMemo(() => (traffic ? buildTrafficArcs(traffic.countries, GA_SERVER_PIN) : []), [traffic]);
   const focusCountry: GaCountryRow | undefined = useMemo(() => {
     if (!traffic || !focus) return undefined;
     const name = focus.split('|')[0];
@@ -183,8 +195,39 @@ export function WorldTrafficSection({ data }: { data: GaWorldData }) {
               secondaryLabel="sessions"
               cardLabel="Location card"
               globeNoun="Traffic"
+              arcs={arcs}
+              server={{ lat: GA_SERVER_PIN.lat, lng: GA_SERVER_PIN.lng, label: 'Server' }}
             />
           </div>
+
+          {arcs.length > 0 && (
+            <div className="mt-4 rounded-lg-t border border-os-border bg-os-surface p-6">
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[13px] text-os-text">
+                <span className="flex items-center gap-2">
+                  <span aria-hidden className="inline-block h-[3px] w-6 rounded-full" style={{ background: `rgb(var(${arcLegColorToken('inbound')}))` }} />
+                  Inbound — visits (country → server)
+                </span>
+                <span className="flex items-center gap-2">
+                  <span aria-hidden className="inline-block h-[3px] w-6 rounded-full" style={{ background: `rgb(var(${arcLegColorToken('outbound')}))` }} />
+                  Outbound — content served (server → country)
+                </span>
+                <span className="flex items-center gap-2">
+                  <span aria-hidden className="inline-block h-2.5 w-2.5 rotate-45" style={{ background: `rgb(var(--ap-server-rgb))` }} />
+                  Server — {GA_SERVER_PIN.city}, {GA_SERVER_PIN.country}
+                </span>
+              </div>
+              <p className="mt-3 text-[12.5px] leading-relaxed text-os-muted">
+                Each session is a round trip: the two arcs for a country are the two legs of the same
+                sessions. Google Analytics reports no separate send and receive counts — the numbers
+                shown are users and sessions.
+              </p>
+              <p className="mt-2 text-[12px] text-os-dim">
+                Server pin: {GA_SERVER_PIN.city}, {GA_SERVER_PIN.country}, from the public geolocation
+                of the server&apos;s address (checked November 2026). It marks where the server&apos;s
+                address geolocates, not a business location.
+              </p>
+            </div>
+          )}
 
           {focusCountry && (
             <div role="region" aria-label={`Location: ${focusCountry.country}`} className="mt-4 rounded-lg-t border border-os-border bg-os-surface p-6">

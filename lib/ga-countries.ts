@@ -208,6 +208,49 @@ export function countryCentroid(countryId: string): { lat: number; lng: number }
   return GA_COUNTRY_CENTROIDS[countryId.toUpperCase()] ?? null;
 }
 
+/**
+ * The Core server's pin. Resolved November 2026 from the VPS's public IP
+ * 40.160.91.143 via the public ip-api.com lookup (no key, no account):
+ * Sterling, Virginia, US (OVH SAS). An IP geolocation marks where the
+ * address geolocates — a datacenter city, never a business location claim —
+ * so the section labels it "Server" and footnotes the source.
+ */
+export type ServerPin = { city: string; country: string; lat: number; lng: number; source: 'ip-geolocation' | 'approximate' };
+export const GA_SERVER_PIN: ServerPin = { city: 'Sterling', country: 'United States', lat: 39.0067, lng: -77.4291, source: 'ip-geolocation' };
+/** Fallback when no lookup resolves: the US centroid, explicitly approximate. */
+export const GA_SERVER_PIN_FALLBACK: ServerPin = { city: 'United States', country: 'United States', lat: 39.8, lng: -98.6, source: 'approximate' };
+export function serverPinOrFallback(resolved: ServerPin | null): ServerPin {
+  return resolved ?? GA_SERVER_PIN_FALLBACK;
+}
+
+export type GaTrafficArcLeg = 'inbound' | 'outbound';
+export type GaTrafficArc = {
+  key: string;
+  from: { lat: number; lng: number };
+  to: { lat: number; lng: number };
+  sessions: number;
+  leg: GaTrafficArcLeg;
+};
+
+/**
+ * One round trip per plotted country, from the SAME sessions number — never
+ * separate send/receive counts, because GA reports none. Inbound is the visit
+ * (country → server); outbound is the content served back (server → country).
+ * Unplotted countries get no arc; they still count in every total.
+ */
+export function buildTrafficArcs(countries: GaGlobeCountry[], server: ServerPin): GaTrafficArc[] {
+  const out: GaTrafficArc[] = [];
+  for (const c of countries) {
+    if (!c.plotted) continue;
+    const pos = countryCentroid(c.countryId);
+    if (!pos) continue;
+    const hub = { lat: server.lat, lng: server.lng };
+    out.push({ key: `${c.countryId}-in`, from: pos, to: hub, sessions: c.sessions, leg: 'inbound' });
+    out.push({ key: `${c.countryId}-out`, from: hub, to: pos, sessions: c.sessions, leg: 'outbound' });
+  }
+  return out;
+}
+
 /** One globe pin per plotted country: the pin sits on the country centroid, sized by users. */
 export type GaGlobeCountry = { countryId: string; country: string; users: number; sessions: number; plotted: boolean };
 export type GaGlobePoint = { city: string; country: string; lat: number; lng: number; leads: number; bookings: number };

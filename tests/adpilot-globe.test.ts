@@ -224,7 +224,7 @@ describe('globe source rules (S11 §9)', () => {
   });
 
   it('colours come from tokens and re-key on theme change (F-R2)', () => {
-    for (const t of ['--ap-globe-rim-rgb', '--ap-globe-bleed-rgb', '--ap-globe-body', '--ap-globe-land-rgb', '--ap-pin', '--ap-pin-core', '--ap-pin-halo-rgb']) {
+    for (const t of ['--ap-globe-rim-rgb', '--ap-globe-bleed-rgb', '--ap-globe-body', '--ap-globe-land-rgb', '--ap-pin', '--ap-pin-core', '--ap-pin-halo-rgb', '--ap-arc-in-rgb', '--ap-arc-out-rgb', '--ap-server-rgb']) {
       expect(globe).toContain(`'${t}'`);
     }
     expect(globe).toMatch(/new MutationObserver/);
@@ -243,7 +243,11 @@ describe('globe source rules (S11 §9)', () => {
     expect(read('app/globals.css')).toMatch(/\.ap-globe-canvas \{[^}]*touch-action: pan-y/);
   });
 
-  it('draws no arcs: every mark is a city with real leads (F-G1)', () => {
-    expect(globe).not.toMatch(/bezierCurveTo|arcs?\s*[:=]/i);
+  it('arcs come only from the arcs prop, never invented (F-G1 superseded Nov 2026)', () => {
+    // The GA world-traffic globe draws missile arcs for real GA rows passed
+    // in via props; the component invents no endpoints of its own, and the
+    // curves are slerp polylines, not beziers.
+    expect(globe).toMatch(/arcs\?: GlobeArc\[\]/);
+    expect(globe).not.toMatch(/bezierCurveTo/);
   });
 });

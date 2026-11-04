@@ -2160,6 +2160,9 @@ html.conductor-dragging .os-shell {
   --ap-pin: #ff4557;
   --ap-pin-core: #8f1520;
   --ap-pin-halo-rgb: 255 69 87;
+  --ap-arc-in-rgb: 34 211 238;
+  --ap-arc-out-rgb: 251 191 36;
+  --ap-server-rgb: 255 255 255;
   --ap-label-bg: rgba(10, 5, 7, 0.9);
   --ap-label-line: rgb(var(--ap-signal-rgb) / 0.28);
 }
@@ -2172,6 +2175,9 @@ html.conductor-dragging .os-shell {
   --ap-pin: #cf2537;
   --ap-pin-core: #7a0f1a;
   --ap-pin-halo-rgb: 207 37 55;
+  --ap-arc-in-rgb: 8 145 178;
+  --ap-arc-out-rgb: 217 119 6;
+  --ap-server-rgb: 15 23 42;
   --ap-label-bg: rgba(255, 255, 255, 0.92);
   --ap-label-line: rgb(var(--ap-signal-rgb) / 0.28);
 }
@@ -2185,6 +2191,9 @@ html.conductor-dragging .os-shell {
   --ap-pin: #9fc6ff;
   --ap-pin-core: #27416b;
   --ap-pin-halo-rgb: 159 198 255;
+  --ap-arc-in-rgb: 34 211 238;
+  --ap-arc-out-rgb: 251 191 36;
+  --ap-server-rgb: 255 255 255;
   --ap-label-bg: var(--glass-chip-bg);
   --ap-label-line: rgb(var(--glass-line-rgb) / 0.3);
 }
@@ -14595,6 +14604,9 @@ textarea.lab2c-input { height: auto; min-height: 96px; padding: 10px 12px; line-
   --ap-pin: #cf2537;
   --ap-pin-core: #7a0f1a;
   --ap-pin-halo-rgb: 207 37 55;
+  --ap-arc-in-rgb: 8 145 178;
+  --ap-arc-out-rgb: 217 119 6;
+  --ap-server-rgb: 15 23 42;
   --ap-label-bg: rgba(255, 255, 255, 0.92);
   --ap-label-line: rgb(var(--ap-signal-rgb) / 0.28);
 }

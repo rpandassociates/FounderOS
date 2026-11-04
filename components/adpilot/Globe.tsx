@@ -10,12 +10,16 @@ import type { GeoPoint } from '@/lib/adpilot';
 import { anchorRect, cityKey, globeLabel, placeLabels, type Anchor, type Rect } from '@/lib/adpilot-globe';
 import {
   PITCH_LIMIT,
+  arcLineWidth,
   centreOn,
   easeOut,
   latLngToVec,
   nearestYaw,
   planetRadius,
   rotate,
+  sampleArc,
+  visibleRuns,
+  type ArcLeg,
   type Vec,
 } from '@/components/adpilot/projection';
 
@@ -34,7 +38,26 @@ import {
  * batched by alpha, and the loop only runs while something moves and the
  * globe is on screen (never off-screen, in a hidden tab, or idle under
  * reduced motion). Plain 2D canvas, no WebGL library.
+ *
+ * Optional arcs (GA world-traffic only): great-circle paths from each
+ * country pin to the server pin, one leg per direction from the SAME
+ * sessions number — inbound (country → server) and outbound (server →
+ * country), in two token colours. AdPilot passes no arcs, so its globe is
+ * unchanged. Arcs are data passed in via props, never invented here.
  */
+
+/** One arc leg: a great-circle path between two lat/lng points, drawn for one direction. */
+export type GlobeArc = {
+  key: string;
+  from: { lat: number; lng: number };
+  to: { lat: number; lng: number };
+  /** Sessions for thickness scaling (the same number on both legs of a round trip). */
+  sessions: number;
+  leg: ArcLeg;
+};
+
+/** The server pin: a datacenter location, labelled "Server" by the caller. */
+export type GlobeServer = { lat: number; lng: number; label: string };
 
 type Props = {
   geo: GeoPoint[];
@@ -52,6 +75,10 @@ type Props = {
   cardLabel?: string;
   /** Noun for the group aria-label (AdPilot default: 'Lead'). */
   globeNoun?: string;
+  /** Traffic arcs (GA world-traffic only); absent means no arcs at all. */
+  arcs?: GlobeArc[];
+  /** Server pin (GA world-traffic only); absent means no server marker. */
+  server?: GlobeServer | null;
 };
 
 const TILT = 0.32;
@@ -77,7 +104,18 @@ const KEY_YAW = (15 * Math.PI) / 180;
 const KEY_PITCH = (10 * Math.PI) / 180;
 
 type Rgb = [number, number, number];
-type Palette = { rim: Rgb; bleed: Rgb; body: string; land: Rgb; pin: string; core: string; halo: Rgb };
+type Palette = {
+  rim: Rgb;
+  bleed: Rgb;
+  body: string;
+  land: Rgb;
+  pin: string;
+  core: string;
+  halo: Rgb;
+  arcIn: Rgb;
+  arcOut: Rgb;
+  server: Rgb;
+};
 
 /** Space- or comma-separated channels from a `-rgb` token. */
 function channels(style: CSSStyleDeclaration, name: string, fallback: Rgb): Rgb {
@@ -109,6 +147,9 @@ function readPalette(el: Element): Palette {
     pin: word('--ap-pin', ink),
     core: word('--ap-pin-core', ink),
     halo: channels(s, '--ap-pin-halo-rgb', rim),
+    arcIn: channels(s, '--ap-arc-in-rgb', [34, 211, 238]),
+    arcOut: channels(s, '--ap-arc-out-rgb', [251, 191, 36]),
+    server: channels(s, '--ap-server-rgb', [255, 255, 255]),
   };
 }
 
@@ -143,7 +184,7 @@ type Tip = { key: string; x: number; y: number };
 /** A chip's placer anchor, its eased offset from the pin head (ox, oy) toward the anchor's (tx, ty), and its measured size. */
 type Chip = { show: boolean; anchor: Anchor | null; ox: number; oy: number; tx: number; ty: number; w: number; h: number };
 
-export function Globe({ geo, height = 560, focus, onFocus, emptyLabel, unitLabel = 'leads', secondaryLabel = 'booked', cardLabel = 'City card', globeNoun = 'Lead' }: Props) {
+export function Globe({ geo, height = 560, focus, onFocus, emptyLabel, unitLabel = 'leads', secondaryLabel = 'booked', cardLabel = 'City card', globeNoun = 'Lead', arcs = [], server = null }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
@@ -169,12 +210,16 @@ export function Globe({ geo, height = 560, focus, onFocus, emptyLabel, unitLabel
     height,
     obstacles: [] as Rect[],
     w: 0,
+    arcs,
+    server,
   });
   live.current.geo = geo;
   live.current.chipCities = chipCities;
   live.current.focus = focus;
   live.current.onFocus = onFocus;
   live.current.height = height;
+  live.current.arcs = arcs;
+  live.current.server = server;
 
   // Imperative handles into the loop, set by the main effect.
   const api = useRef<{
@@ -603,6 +648,66 @@ export function Globe({ geo, height = 560, focus, onFocus, emptyLabel, unitLabel
         }
       }
 
+      // Traffic arcs (GA only): great-circle paths from each country to the
+      // server, one leg per direction from the same sessions number. The
+      // outbound leg rides higher so the two legs read as separate curves.
+      // Samples are split at the limb (the same z > 0 rule as the pins), so
+      // a far-side arc never draws across the disc.
+      const arcList = live.current.arcs;
+      if (arcList.length > 0) {
+        const maxSessions = Math.max(1, ...arcList.map((a) => a.sessions));
+        const widthScale = Math.max(0.8, Math.min(1.4, R / 320));
+        ctx!.lineCap = 'round';
+        ctx!.lineJoin = 'round';
+        for (const a of arcList) {
+          const lift = a.leg === 'outbound' ? 0.3 : 0.18;
+          const pts = sampleArc(a.from, a.to, 32, lift).map((s) => {
+            const r = rotate(s.v, yaw, pitch);
+            return { t: s.t, x: r.x, y: r.y, z: r.z };
+          });
+          const runs = visibleRuns(pts);
+          const col = a.leg === 'inbound' ? pal.arcIn : pal.arcOut;
+          ctx!.lineWidth = arcLineWidth(a.sessions, maxSessions) * widthScale;
+          for (const run of runs) {
+            if (run.length < 2) continue;
+            for (let i = 0; i < run.length - 1; i++) {
+              const p = run[i];
+              const q = run[i + 1];
+              const az = Math.max(0, (p.z + q.z) / 2);
+              ctx!.strokeStyle = tokenFill(col, 0.3 + 0.6 * az);
+              ctx!.beginPath();
+              ctx!.moveTo(cx + p.x * R, cy - p.y * R);
+              ctx!.lineTo(cx + q.x * R, cy - q.y * R);
+              ctx!.stroke();
+            }
+          }
+          // Arrowhead at the receiving end, only when the endpoint itself is visible.
+          const lastRun = runs[runs.length - 1];
+          if (lastRun && lastRun.length >= 2 && lastRun[lastRun.length - 1].t === 1) {
+            const tip = lastRun[lastRun.length - 1];
+            const prev = lastRun[lastRun.length - 2];
+            const tx = cx + tip.x * R;
+            const ty = cy - tip.y * R;
+            const px = cx + prev.x * R;
+            const py = cy - prev.y * R;
+            const dx = tx - px;
+            const dy = ty - py;
+            const len = Math.hypot(dx, dy) || 1;
+            const ux = dx / len;
+            const uy = dy / len;
+            const head = 8;
+            const half = 3.5;
+            ctx!.fillStyle = tokenFill(col, 0.95);
+            ctx!.beginPath();
+            ctx!.moveTo(tx, ty);
+            ctx!.lineTo(tx - ux * head - uy * half, ty - uy * head + ux * half);
+            ctx!.lineTo(tx - ux * head + uy * half, ty - uy * head - ux * half);
+            ctx!.closePath();
+            ctx!.fill();
+          }
+        }
+      }
+
       // Pins with a soft ground halo, sized by leads; tip anchored on the surface.
       const coarse = coarseQuery.matches;
       const marked = focused ?? live.current.preview;
@@ -638,6 +743,31 @@ export function Globe({ geo, height = 560, focus, onFocus, emptyLabel, unitLabel
         }
       }
       ctx!.globalAlpha = 1;
+
+      // Server pin (GA only): a diamond + ring, distinct from the teardrop
+      // country pins, drawn on top so it reads under a busy pin field.
+      const srv = live.current.server;
+      if (srv) {
+        const sv = rotate(latLngToVec(srv.lat, srv.lng), yaw, pitch);
+        if (sv.z > 0) {
+          const sx = cx + sv.x * R;
+          const sy = cy - sv.y * R;
+          const d = Math.max(5, R * 0.022);
+          ctx!.fillStyle = tokenFill(pal.server, 0.95);
+          ctx!.beginPath();
+          ctx!.moveTo(sx, sy - d);
+          ctx!.lineTo(sx + d, sy);
+          ctx!.lineTo(sx, sy + d);
+          ctx!.lineTo(sx - d, sy);
+          ctx!.closePath();
+          ctx!.fill();
+          ctx!.strokeStyle = tokenFill(pal.server, 0.5);
+          ctx!.lineWidth = 1.2;
+          ctx!.beginPath();
+          ctx!.arc(sx, sy, d * 2.1, 0, Math.PI * 2);
+          ctx!.stroke();
+        }
+      }
 
       // Chips (F-G5).
       if (frameNo - lastObstacles >= 30) {
