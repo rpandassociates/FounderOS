@@ -176,6 +176,9 @@ describe('platform smoke — every GET API route answers 200 with JSON', () => {
       'creative-engine/workflows/[id]/versions',
       // answers text/html "No sign-in in progress." with no params; its own test below (AC-08-4)
       'lab/oauth/[provider]/callback',
+      // GA OAuth callback: 400 without a valid state cookie, redirect on
+      // success — never a 200 JSON; failure paths covered in tests/ga-routes.test.ts
+      'connectors/ga-data/callback',
       // serves the contact sheet image (raw bytes, 404 without a sheet); covered in tests/lab-gen-frames.test.ts
       'lab/frames',
     ]);
