@@ -122,13 +122,14 @@ export function placeLabels(candidates: LabelCandidate[], obstacles: Rect[], bou
   return out;
 }
 
-/** The canvas's accessible name (S11 F-G6, F-G7). */
-export function globeLabel(geo: GeoPoint[], emptyLabel = 'No lead locations yet'): string {
+/** The canvas's accessible name (S11 F-G6, F-G7). `unit` names the metric (AdPilot: 'leads'). */
+export function globeLabel(geo: GeoPoint[], emptyLabel = 'No lead locations yet', unit = 'leads'): string {
   if (geo.length === 0) return emptyLabel;
+  const noun = unit.charAt(0).toUpperCase() + unit.slice(1);
   const top = [...geo]
     .sort((a, b) => b.leads - a.leads)
     .slice(0, 3)
     .map((g) => `${g.city} ${g.leads}`)
     .join(', ');
-  return `Leads by city: ${geo.length} ${geo.length === 1 ? 'city' : 'cities'}. Top: ${top}.`;
+  return `${noun} by city: ${geo.length} ${geo.length === 1 ? 'city' : 'cities'}. Top: ${top}.`;
 }

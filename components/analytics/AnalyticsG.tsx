@@ -10,6 +10,7 @@
  */
 
 import { Instagram, Linkedin, Music2, Twitter, Youtube, type LucideIcon } from 'lucide-react';
+import type { ReactNode } from 'react';
 import {
   GAreaChart, GBar, GButton, GCard, GDelta, GDonut, GList, GPage, GRow, GSectionHeader, GSparkline, GTag,
   type DonutSlice,
@@ -50,6 +51,8 @@ export type AnalyticsGProps = {
   };
   pending: { id: string; label: string; source: string; setupHref: string }[];
   platforms: { platform: string; label: string; href: string; followers: number | null; cur: number | null; prev: number | null; spark: number[] }[];
+  /** World traffic section (GA globe), rendered by the page when available. */
+  worldTraffic?: ReactNode;
 };
 
 const ICONS: Record<string, LucideIcon> = { instagram: Instagram, tiktok: Music2, twitter: Twitter, youtube: Youtube, linkedin: Linkedin };
@@ -186,6 +189,9 @@ export function AnalyticsG(p: AnalyticsGProps) {
           </div>
         </section>
       )}
+
+      {/* World traffic — GA globe, rendered by the page when available */}
+      {p.worldTraffic}
     </GPage>
   );
 }

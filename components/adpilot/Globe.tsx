@@ -44,6 +44,14 @@ type Props = {
   onFocus: (key: string | null) => void;
   /** The accessible name when `geo` is empty. */
   emptyLabel?: string;
+  /** Metric name for chips, tooltips and labels (AdPilot default: 'leads'). */
+  unitLabel?: string;
+  /** Secondary metric name for tooltips and the list (AdPilot default: 'booked'). */
+  secondaryLabel?: string;
+  /** Card name in chip titles (AdPilot default: 'City card'). */
+  cardLabel?: string;
+  /** Noun for the group aria-label (AdPilot default: 'Lead'). */
+  globeNoun?: string;
 };
 
 const TILT = 0.32;
@@ -135,7 +143,7 @@ type Tip = { key: string; x: number; y: number };
 /** A chip's placer anchor, its eased offset from the pin head (ox, oy) toward the anchor's (tx, ty), and its measured size. */
 type Chip = { show: boolean; anchor: Anchor | null; ox: number; oy: number; tx: number; ty: number; w: number; h: number };
 
-export function Globe({ geo, height = 560, focus, onFocus, emptyLabel }: Props) {
+export function Globe({ geo, height = 560, focus, onFocus, emptyLabel, unitLabel = 'leads', secondaryLabel = 'booked', cardLabel = 'City card', globeNoun = 'Lead' }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
@@ -862,7 +870,7 @@ export function Globe({ geo, height = 560, focus, onFocus, emptyLabel }: Props) 
     }
   };
 
-  const label = globeLabel(geo, emptyLabel);
+  const label = globeLabel(geo, emptyLabel, unitLabel);
   // Under the GladOS style (GStyleProvider) the chips are kit chips and the focus region a kit viz part (GP4).
   const gc = useGc();
   const planetPx = Math.round(planetRadius(live.current.w || 1, height + OVERHANG * 2) * 2);
@@ -873,7 +881,7 @@ export function Globe({ geo, height = 560, focus, onFocus, emptyLabel }: Props) 
       data-globe
       tabIndex={0}
       role="group"
-      aria-label="Lead globe. Arrow keys rotate it, Enter opens the city nearest the centre, Escape closes it."
+      aria-label={`${globeNoun} globe. Arrow keys rotate it, Enter opens the city nearest the centre, Escape closes it.`}
       onKeyDown={onKey}
       className={gc('g-viz-globe ap-globe relative w-full outline-none', 'ap-globe relative w-full outline-none')}
       data-entered={entered ? '1' : '0'}
@@ -894,11 +902,11 @@ export function Globe({ geo, height = 560, focus, onFocus, emptyLabel }: Props) 
             chipRefs.current[i] = el;
           }}
           onClick={() => onFocus(cityKey(g))}
-          title={`${g.city}, ${g.country}: open the City card`}
+          title={`${g.city}, ${g.country}: open the ${cardLabel}`}
           className={gc('g-chip ap-globe-chip absolute left-0 top-0 z-20', 'ap-globe-chip absolute left-0 top-0 z-20 flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1')}
         >
           <span className="text-[12px] text-os-text">{g.city}</span>
-          <span className="text-[11px] tabular-nums text-os-muted">{g.leads} leads</span>
+          <span className="text-[11px] tabular-nums text-os-muted">{g.leads} {unitLabel}</span>
         </button>
       ))}
       {tip && tipCity && (
@@ -907,7 +915,7 @@ export function Globe({ geo, height = 560, focus, onFocus, emptyLabel }: Props) 
             {tipCity.city}, {tipCity.country}
           </div>
           <div className="text-[11.5px] tabular-nums text-os-muted">
-            {tipCity.leads} leads · {tipCity.bookings} booked
+            {tipCity.leads} {unitLabel} · {tipCity.bookings} {secondaryLabel}
           </div>
         </div>
       )}
@@ -926,7 +934,7 @@ export function Globe({ geo, height = 560, focus, onFocus, emptyLabel }: Props) 
                 onBlur={() => preview(null)}
                 onClick={() => onFocus(key)}
               >
-                {g.city}, {g.country}: {g.leads} leads, {g.bookings} booked
+                {g.city}, {g.country}: {g.leads} {unitLabel}, {g.bookings} {secondaryLabel}
               </button>
             </li>
           );

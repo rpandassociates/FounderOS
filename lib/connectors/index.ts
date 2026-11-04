@@ -17,6 +17,7 @@ import { llmStatus } from '@/lib/connectors/llm';
 import { webinarjamStatus } from '@/lib/connectors/webinarjam';
 import { trakyoStatus } from '@/lib/connectors/trakyo';
 import { metaAdsStatus } from '@/lib/connectors/meta-ads';
+import { gaDataStatus } from '@/lib/connectors/ga-data';
 import { foreplayStatus } from '@/lib/connectors/foreplay';
 import { ghlStatus } from '@/lib/connectors/ghl';
 import { apifyStatus } from '@/lib/connectors/apify';
@@ -64,6 +65,7 @@ const CHECKS: [string, ConnectorStatus['kind'], () => Promise<ConnectorStatus>][
   ['webinarjam', 'crm', webinarjamStatus],
   ['trakyo', 'crm', trakyoStatus],
   ['meta-ads', 'ads', metaAdsStatus],
+  ['ga-data', 'analytics', gaDataStatus],
   ['foreplay', 'creative', foreplayStatus],
   ['apify', 'social', apifyStatus],
   ['ghl', 'crm', ghlStatus],

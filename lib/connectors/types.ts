@@ -10,6 +10,7 @@ export type ConnectorKind =
   | 'social'
   | 'crm'
   | 'ads'
+  | 'analytics'
   | 'creative'
   | 'knowledge'
   | 'local'

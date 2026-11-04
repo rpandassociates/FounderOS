@@ -9,6 +9,8 @@ import { agentRunVolume, runsWithin } from '@/lib/analytics';
 import { splitMetrics, type MetricInput, type MetricTile } from '@/lib/operating-metrics';
 import { SetupLink } from '@/components/SetupLink';
 import { setupHrefFor } from '@/lib/integrations-catalog';
+import { gaTrafficAll } from '@/lib/connectors/ga-data';
+import { WorldTrafficSection } from '@/components/analytics/WorldTrafficSection';
 
 /** Pending metric → the connector whose connect flow fixes it. */
 const PENDING_CONNECTOR: Record<string, string> = {
@@ -173,6 +175,11 @@ export default async function AnalyticsPage() {
   ]);
   const today = new Date().toISOString().slice(0, 10);
 
+  // World traffic (GA connector): read outside the sync block above so the
+  // honesty test's exact Promise.all text is untouched. A failure here must
+  // never take down /analytics: null renders no section (absent, not fake).
+  const gaWorld = await gaTrafficAll().catch(() => null);
+
   // Real agent-run activity — powers the agent-runs tile, the volume chart, and
   // the run-distribution pies.
   const runs = db.agentRuns.recent(2000);
@@ -311,6 +318,7 @@ export default async function AnalyticsPage() {
           ...week(pl.platform),
           spark: platformSpark.get(pl.platform) ?? [],
         }))}
+        worldTraffic={gaWorld ? <WorldTrafficSection data={gaWorld} /> : undefined}
       />
     );
   }
@@ -474,6 +482,13 @@ export default async function AnalyticsPage() {
           })}
         </div>
       </section>
+
+      {/* World traffic — GA users/sessions by country on the AdPilot globe */}
+      {gaWorld && (
+        <section className="mt-8">
+          <WorldTrafficSection data={gaWorld} />
+        </section>
+      )}
     </div>
   );
 }
