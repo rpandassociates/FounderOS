@@ -57,6 +57,7 @@ export function channelOfJourney(j: FunnelJourney): FunnelChannelId {
   const first = j.touches[0];
   if (!first) return 'unattributed';
   if (first.source === 'meta-ads') return 'paid';
+  if (first.source === 'wordpress') return 'forms';
   if (first.source !== 'trakyo') return 'unattributed';
   return classifyChannel(first.label, first.channel === 'ads');
 }

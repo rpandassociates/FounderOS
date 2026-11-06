@@ -552,7 +552,7 @@ export const FunnelChannelSchema = z.enum(['organic', 'ads', 'dm', 'email', 'web
 // Where each touch comes from: Trakyo (organic attribution), Meta Ads MCP
 // (paid), Attio (live CRM pipeline), manual otherwise. Seeded rows carry the
 // intended source so the live swap is a repo-level change.
-export const FunnelSourceSchema = z.enum(['trakyo', 'meta-ads', 'attio', 'ghl', 'manual']);
+export const FunnelSourceSchema = z.enum(['trakyo', 'meta-ads', 'attio', 'ghl', 'manual', 'wordpress']);
 
 // Relationship temperature with the operator — with likelihood-to-buy (0–100) it
 // drives how a client node renders in the funnel space. Seeded dummy; later
