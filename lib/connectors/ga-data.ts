@@ -26,6 +26,32 @@ import { gaAccessToken, GaInvalidGrantError } from '@/lib/connectors/ga-oauth';
 
 export const GA_DATA_API = 'https://analyticsdata.googleapis.com/v1beta';
 export const GA_RANGE_DAYS = 28;
+export const GA_ADMIN_API = 'https://analyticsadmin.googleapis.com/v1beta';
+
+/**
+ * Fallback-only display labels (property id → URL host), used when the GA
+ * Admin API call fails or has nothing for a property. LABELS ONLY: this map
+ * never feeds the globe query, and property IDs still come from
+ * GA_DATA_PROPERTY_IDS alone (see gaDataConfig).
+ *
+ * UNVERIFIED: recorded Nov 4 when the ten properties were created. The notes
+ * held short names for eight of the ten; the `.thecreativityfoundry.com`
+ * subdomain form is a working assumption, not checked against the Admin API
+ * (package Step 0 had not been run at build time). When the Admin API is
+ * reachable its value wins over this map.
+ */
+export const GA_PROPERTY_FALLBACK_LABELS: Readonly<Record<string, string>> = {
+  '562394779': 'thecreativityfoundry.com',
+  '562345583': 'tracker.thecreativityfoundry.com',
+  '562380425': 'createit.thecreativityfoundry.com',
+  '562394781': 'foundryburger.thecreativityfoundry.com',
+  '562377859': 'landscapers.thecreativityfoundry.com',
+  '562396793': 'landscaping.thecreativityfoundry.com',
+  '562378015': 'luber.thecreativityfoundry.com',
+  '562384596': 'mechanics.thecreativityfoundry.com',
+  '562395728': 'pizza.thecreativityfoundry.com',
+  '562411767': 'rideshare.thecreativityfoundry.com',
+};
 
 export type GaConfig = {
   clientId?: string;
@@ -214,6 +240,93 @@ export async function gaTrafficForProperty(
   return aggregateGaTraffic(rows, propertyId, range.startDate, range.endDate);
 }
 
+/**
+ * `defaultUri` → bare lowercase host: strips scheme, userinfo, port, path,
+ * query and trailing slash. Returns '' when nothing host-like remains.
+ */
+export function normalizeGaHost(uri: string): string {
+  if (typeof uri !== 'string') return '';
+  let s = uri.trim();
+  if (!s) return '';
+  s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '');
+  s = s.split(/[/?#]/)[0] ?? '';
+  s = s.replace(/^[^@]*@/, '').replace(/:\d+$/, '').toLowerCase();
+  return /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(s) ? s : '';
+}
+
+/** Map label for an id, else the numeric id itself — never blank, never invented. */
+export function gaFallbackLabel(propertyId: string): string {
+  return GA_PROPERTY_FALLBACK_LABELS[propertyId] ?? propertyId;
+}
+
+/** Labels for every id from the fallback map / numeric id only (no network). */
+export function gaFallbackLabels(propertyIds: string[]): Record<string, string> {
+  return Object.fromEntries(propertyIds.map((id) => [id, gaFallbackLabel(id)]));
+}
+
+/**
+ * Display label per configured property, resolved server-side from the GA
+ * Admin API with the same Bearer token as the Data API reads (analytics.readonly).
+ * Per property: first WEB_DATA_STREAM `defaultUri` host, else the property
+ * displayName (from accountSummaries), else the fallback map, else the numeric
+ * id. Never throws: a failed call falls back for that property (or for all of
+ * them, if accountSummaries and every dataStreams call fail, e.g. a 403).
+ */
+export async function resolveGaPropertyLabels(
+  propertyIds: string[],
+  accessToken: string,
+  opts: { fetchFn?: FetchFn } = {},
+): Promise<Record<string, string>> {
+  const fetchFn = (opts.fetchFn ?? fetch) as FetchFn;
+  const headers = { Authorization: `Bearer ${accessToken}` };
+
+  const displayNames: Record<string, string> = {};
+  try {
+    const res = await fetchFn(`${GA_ADMIN_API}/accountSummaries?pageSize=200`, { headers, signal: AbortSignal.timeout(10000) });
+    if (!res.ok) throw new Error(`GA Admin API answered ${res.status} for accountSummaries`);
+    const body = (await res.json()) as {
+      accountSummaries?: { propertySummaries?: { displayName?: unknown; property?: unknown }[] }[];
+    };
+    for (const account of body?.accountSummaries ?? []) {
+      for (const p of account?.propertySummaries ?? []) {
+        const id = typeof p?.property === 'string' ? p.property.replace(/^properties\//, '') : '';
+        const name = typeof p?.displayName === 'string' ? p.displayName.trim() : '';
+        if (id && name) displayNames[id] = name;
+      }
+    }
+  } catch (err) {
+    console.error('[ga-data] property display names unavailable:', err instanceof Error ? err.message : String(err));
+  }
+
+  const entries = await Promise.all(
+    propertyIds.map(async (id): Promise<[string, string]> => {
+      let host = '';
+      try {
+        const res = await fetchFn(`${GA_ADMIN_API}/properties/${id}/dataStreams?pageSize=10`, { headers, signal: AbortSignal.timeout(10000) });
+        if (!res.ok) throw new Error(`GA Admin API answered ${res.status} for property ${id} dataStreams`);
+        const body = (await res.json()) as {
+          dataStreams?: { type?: unknown; webStreamData?: { defaultUri?: unknown } }[];
+        };
+        const web = (body?.dataStreams ?? []).filter((s) => s?.type === 'WEB_DATA_STREAM');
+        if (web.length > 1) console.warn(`[ga-data] property ${id} has ${web.length} web streams; using the first`);
+        const uri = web[0]?.webStreamData?.defaultUri;
+        host = typeof uri === 'string' ? normalizeGaHost(uri) : '';
+      } catch (err) {
+        console.error(`[ga-data] property ${id} label lookup failed:`, err instanceof Error ? err.message : String(err));
+      }
+      return [id, host || displayNames[id] || gaFallbackLabel(id)];
+    }),
+  );
+  return Object.fromEntries(entries);
+}
+
+/** Short, non-secret hash of the sorted id list, for the label cache key. */
+function idsHash(propertyIds: string[]): string {
+  let h = 5381;
+  for (const ch of [...propertyIds].sort().join(',')) h = ((h * 33) ^ ch.charCodeAt(0)) >>> 0;
+  return h.toString(36);
+}
+
 export type GaWorldData = {
   configured: boolean;
   /** Client id + secret saved but no refresh token yet: the section can offer Connect with Google. */
@@ -224,6 +337,8 @@ export type GaWorldData = {
   rangeLabel: string;
   traffic: Record<string, GaTraffic>;
   errors: Record<string, string>;
+  /** Property id → display label (URL host). Falls back to map, then the id itself. */
+  propertyLabels: Record<string, string>;
 };
 
 /**
@@ -244,6 +359,7 @@ export async function gaTrafficAll(env: Record<string, string | undefined> = run
     rangeLabel: `Last ${GA_RANGE_DAYS} days`,
     traffic: {} as Record<string, GaTraffic>,
     errors: {} as Record<string, string>,
+    propertyLabels: {} as Record<string, string>,
   };
   if (gaMissingPieces(config).length > 0) return base;
   const token = await gaAccessToken().catch(() => null);
@@ -252,6 +368,16 @@ export async function gaTrafficAll(env: Record<string, string | undefined> = run
   }
   const traffic: Record<string, GaTraffic> = {};
   const errors: Record<string, string> = {};
+  // Labels resolve in parallel with the traffic reads and can never fail the
+  // page: any rejection degrades to the fallback map / numeric id.
+  const labelsPromise: Promise<Record<string, string>> = swr(
+    `ga-data:property-labels:${keyTag(token)}:${idsHash(config.propertyIds)}`,
+    TTL.social,
+    () => resolveGaPropertyLabels(config.propertyIds, token),
+  ).catch((err: unknown) => {
+    console.error('[ga-data] property label resolution failed:', err instanceof Error ? err.message : String(err));
+    return gaFallbackLabels(config.propertyIds);
+  });
   await Promise.all(
     config.propertyIds.map(async (propertyId) => {
       try {
@@ -263,7 +389,8 @@ export async function gaTrafficAll(env: Record<string, string | undefined> = run
       }
     }),
   );
-  return { ...base, configured: true, traffic, errors };
+  const propertyLabels = await labelsPromise;
+  return { ...base, configured: true, traffic, errors, propertyLabels };
 }
 
 /** Globe-ready points for one property's traffic: one pin per plotted country, sized by users. */
