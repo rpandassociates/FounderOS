@@ -12,8 +12,11 @@ import {
   gaDataStatus,
   gaDateRange,
   gaMissingPieces,
+  gaTrafficAll,
   gaTrafficForProperty,
+  normalizeGaHost,
   parseGaReport,
+  resolveGaPropertyLabels,
 } from '@/lib/connectors/ga-data';
 import { GaInvalidGrantError, clearGaTokenCache, gaAccessToken, gaExchangeCode, type OAuthFetch } from '@/lib/connectors/ga-oauth';
 
@@ -177,6 +180,135 @@ describe('gaTrafficForProperty', () => {
   test('HTTP errors throw so the caller reports them honestly', async () => {
     const fetchFn = (async () => ({ ok: false, status: 403, json: async () => ({}) })) as never;
     await expect(gaTrafficForProperty('123', { startDate: '2026-10-07', endDate: '2026-11-03' }, { fetchFn, accessToken: 'tok' })).rejects.toThrow('403');
+  });
+});
+
+describe('normalizeGaHost', () => {
+  test('strips scheme and trailing slash', () => {
+    expect(normalizeGaHost('https://landscaping.thecreativityfoundry.com/')).toBe('landscaping.thecreativityfoundry.com');
+  });
+  test('a bare host passes through unchanged, lowercased', () => {
+    expect(normalizeGaHost('landscaping.thecreativityfoundry.com')).toBe('landscaping.thecreativityfoundry.com');
+    expect(normalizeGaHost('HTTPS://Example.COM')).toBe('example.com');
+  });
+  test('drops path, query, fragment and port', () => {
+    expect(normalizeGaHost('https://example.com/some/path')).toBe('example.com');
+    expect(normalizeGaHost('https://example.com:8443/a?b=c#d')).toBe('example.com');
+  });
+  test('empty or garbage gives an empty string', () => {
+    expect(normalizeGaHost('')).toBe('');
+    expect(normalizeGaHost('   ')).toBe('');
+    expect(normalizeGaHost('not a url!!')).toBe('');
+    expect(normalizeGaHost('https://')).toBe('');
+  });
+});
+
+const jsonRes = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body });
+
+/** Stub for the Admin API: accountSummaries body + dataStreams body per property id. */
+const adminFetch = (opts: { summaries?: unknown; streams?: Record<string, unknown>; status?: number }) =>
+  (async (url: string) => {
+    if (opts.status && opts.status >= 400) return jsonRes({}, opts.status);
+    if (url.includes('/accountSummaries')) return jsonRes(opts.summaries ?? {});
+    const m = /\/properties\/(\d+)\/dataStreams/.exec(url);
+    if (m) return jsonRes(opts.streams?.[m[1]] ?? {});
+    return jsonRes({}, 404);
+  }) as never;
+
+const webStream = (defaultUri: string) => ({ dataStreams: [{ type: 'WEB_DATA_STREAM', webStreamData: { defaultUri } }] });
+
+describe('resolveGaPropertyLabels', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  test('merges displayNames with stream hosts; the host wins over the displayName', async () => {
+    const fetchFn = adminFetch({
+      summaries: {
+        accountSummaries: [
+          { propertySummaries: [{ property: 'properties/111', displayName: 'Alpha Site' }, { property: 'properties/222', displayName: 'Beta Site' }] },
+        ],
+      },
+      streams: { '111': webStream('https://alpha.example.com/'), '222': {} },
+    });
+    const labels = await resolveGaPropertyLabels(['111', '222'], 'tok', { fetchFn });
+    expect(labels['111']).toBe('alpha.example.com');
+    expect(labels['222']).toBe('Beta Site');
+  });
+
+  test('uses the first WEB_DATA_STREAM and skips non-web streams', async () => {
+    const fetchFn = adminFetch({
+      streams: {
+        '111': {
+          dataStreams: [
+            { type: 'ANDROID_APP_DATA_STREAM' },
+            { type: 'WEB_DATA_STREAM', webStreamData: { defaultUri: 'HTTPS://One.Example.com/path' } },
+            { type: 'WEB_DATA_STREAM', webStreamData: { defaultUri: 'https://two.example.com' } },
+          ],
+        },
+      },
+    });
+    expect((await resolveGaPropertyLabels(['111'], 'tok', { fetchFn }))['111']).toBe('one.example.com');
+  });
+
+  test('calls the Admin API with the Bearer token only', async () => {
+    const seen: { url: string; auth?: string }[] = [];
+    const fetchFn = (async (url: string, init?: { headers?: Record<string, string> }) => {
+      seen.push({ url, auth: init?.headers?.Authorization });
+      return jsonRes({});
+    }) as never;
+    await resolveGaPropertyLabels(['111'], 'tok', { fetchFn });
+    expect(seen.map((x) => x.url)).toEqual([
+      'https://analyticsadmin.googleapis.com/v1beta/accountSummaries?pageSize=200',
+      'https://analyticsadmin.googleapis.com/v1beta/properties/111/dataStreams?pageSize=10',
+    ]);
+    expect(seen.every((x) => x.auth === 'Bearer tok')).toBe(true);
+  });
+
+  test('Admin API 403 on every call falls back to the map, then to the numeric id', async () => {
+    const labels = await resolveGaPropertyLabels(['562396793', '999'], 'tok', { fetchFn: adminFetch({ status: 403 }) });
+    expect(labels['562396793']).toBe('landscaping.thecreativityfoundry.com');
+    expect(labels['999']).toBe('999');
+  });
+
+  test('a network error falls back instead of throwing', async () => {
+    const fetchFn = (async () => {
+      throw new Error('network down');
+    }) as never;
+    await expect(resolveGaPropertyLabels(['562394779'], 'tok', { fetchFn })).resolves.toEqual({ '562394779': 'thecreativityfoundry.com' });
+  });
+
+  test('no web stream and no displayName falls back to the map', async () => {
+    const fetchFn = adminFetch({ summaries: { accountSummaries: [] }, streams: { '562394779': {} } });
+    expect((await resolveGaPropertyLabels(['562394779'], 'tok', { fetchFn }))['562394779']).toBe('thecreativityfoundry.com');
+  });
+
+  test('a property in neither the Admin API response nor the map is labelled by its numeric id', async () => {
+    const fetchFn = adminFetch({ summaries: { accountSummaries: [] }, streams: {} });
+    expect(await resolveGaPropertyLabels(['999'], 'tok', { fetchFn })).toEqual({ '999': '999' });
+  });
+});
+
+describe('gaTrafficAll property labels', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  test('traffic still loads when label resolution fails (labels fail, globe does not)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('analyticsadmin')) throw new Error('admin api down');
+        if (url.includes('analyticsdata')) return new Response(JSON.stringify(runReportPayload), { status: 200 });
+        return new Response(JSON.stringify({ access_token: 'at', expires_in: 3600 }), { status: 200 });
+      }),
+    );
+    const world = await gaTrafficAll({ ...FULL_ENV, GA_DATA_PROPERTY_IDS: '777001' });
+    expect(world.configured).toBe(true);
+    expect(world.errors).toEqual({});
+    expect(world.traffic['777001'].totalUsers).toBe(165);
+    expect(world.propertyLabels['777001']).toBe('777001');
   });
 });
 
