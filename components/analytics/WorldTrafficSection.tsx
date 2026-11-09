@@ -149,8 +149,8 @@ export function WorldTrafficSection({ data }: { data: GaWorldData }) {
             className="rounded-sm-t border border-os-border bg-os-surface px-2.5 py-2 text-[13px] text-os-text"
           >
             {data.propertyIds.map((id) => (
-              <option key={id} value={id}>
-                {id}
+              <option key={id} value={id} title={`GA property ${id}`}>
+                {data.propertyLabels[id] ?? id}
               </option>
             ))}
           </select>
